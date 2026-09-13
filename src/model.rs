@@ -1254,7 +1254,41 @@ pub trait ProblemOrSolving: sealed::Sealed {
     /// # Returns
     ///
     /// The created `Constraint`
+    ///
+    /// # Panics
+    ///
+    /// This method panics if `vars` is empty, if any variable belongs to another model, if the
+    /// number of weights differs from the number of variables, or if the constraint cannot be
+    /// created in the current state.
     fn add_cons_sos1(
+        &mut self,
+        vars: Vec<&Variable>,
+        weights: Option<&[f64]>,
+        name: &str,
+    ) -> Constraint;
+
+    /// Adds a new SOS2 constraint to the model with the given variables, optional weights, and name.
+    ///
+    /// At most two variables in an SOS2 constraint may be nonzero, and two nonzero variables must
+    /// be adjacent in the constraint's ordering. If `weights` is `None`, the order of `vars` is
+    /// used. Otherwise, variables are ordered by ascending weight.
+    ///
+    /// # Arguments
+    ///
+    /// * `vars` - The variables in the SOS2 constraint.
+    /// * `weights` - Optional weights defining the variable order.
+    /// * `name` - The name of the constraint.
+    ///
+    /// # Returns
+    ///
+    /// The created `Constraint`.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if `vars` is empty, if any variable belongs to another model, if the
+    /// number of weights differs from the number of variables, or if the constraint cannot be
+    /// created in the current state.
+    fn add_cons_sos2(
         &mut self,
         vars: Vec<&Variable>,
         weights: Option<&[f64]>,
@@ -1640,6 +1674,12 @@ impl<S: ModelStageProblemOrSolving> ProblemOrSolving for Model<S> {
     /// # Returns
     ///
     /// The created `Constraint`
+    ///
+    /// # Panics
+    ///
+    /// This method panics if `vars` is empty, if any variable belongs to another model, if the
+    /// number of weights differs from the number of variables, or if the constraint cannot be
+    /// created in the current state.
     fn add_cons_sos1(
         &mut self,
         vars: Vec<&Variable>,
@@ -1650,6 +1690,44 @@ impl<S: ModelStageProblemOrSolving> ProblemOrSolving for Model<S> {
             .scip
             .create_cons_sos1(vars, weights, name)
             .expect("Failed to create SOS1 constraint");
+
+        Constraint {
+            raw: cons,
+            scip: self.scip.clone(),
+        }
+    }
+
+    /// Adds a new SOS2 constraint to the model with the given variables, optional weights, and name.
+    ///
+    /// At most two variables in an SOS2 constraint may be nonzero, and two nonzero variables must
+    /// be adjacent in the constraint's ordering. If `weights` is `None`, the order of `vars` is
+    /// used. Otherwise, variables are ordered by ascending weight.
+    ///
+    /// # Arguments
+    ///
+    /// * `vars` - The variables in the SOS2 constraint.
+    /// * `weights` - Optional weights defining the variable order.
+    /// * `name` - The name of the constraint.
+    ///
+    /// # Returns
+    ///
+    /// The created `Constraint`.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if `vars` is empty, if any variable belongs to another model, if the
+    /// number of weights differs from the number of variables, or if the constraint cannot be
+    /// created in the current state.
+    fn add_cons_sos2(
+        &mut self,
+        vars: Vec<&Variable>,
+        weights: Option<&[f64]>,
+        name: &str,
+    ) -> Constraint {
+        let cons = self
+            .scip
+            .create_cons_sos2(vars, weights, name)
+            .expect("Failed to create SOS2 constraint");
 
         Constraint {
             raw: cons,
@@ -2986,6 +3064,93 @@ mod tests {
         assert_eq!(solution.val(&x2), 0.);
         assert_eq!(solution.val(&x3), 0.);
         assert_eq!(solved_model.obj_val(), 10.);
+    }
+
+    #[test]
+    #[should_panic(expected = "InvalidData")]
+    fn sos1_constraint_rejects_foreign_variable() {
+        let mut source = Model::default().hide_output();
+        let foreign = source.add_var(0., 1., 0., "foreign", VarType::Continuous);
+
+        let mut target = Model::default().hide_output();
+        let local = target.add_var(0., 1., 0., "local", VarType::Continuous);
+        target.add_cons_sos1(vec![&local, &foreign], None, "sos1");
+    }
+
+    #[test]
+    fn sos2_constraint_uses_natural_order() {
+        let mut model = Model::new()
+            .hide_output()
+            .include_default_plugins()
+            .create_prob("test")
+            .set_obj_sense(ObjSense::Maximize);
+
+        let x1 = model.add_var(0., 1., 2., "x1", VarType::Continuous);
+        let x2 = model.add_var(0., 1., 1., "x2", VarType::Continuous);
+        let x3 = model.add_var(0., 1., 1., "x3", VarType::Continuous);
+        let x4 = model.add_var(0., 1., 2., "x4", VarType::Continuous);
+
+        model.add_cons_sos2(vec![&x1, &x2, &x3, &x4], None, "sos2");
+
+        let solved_model = model.solve();
+        assert_eq!(solved_model.status(), Status::Optimal);
+        assert_eq!(solved_model.obj_val(), 3.);
+
+        let solution = solved_model.best_sol().unwrap();
+        assert!(solution.val(&x1) == 0. || solution.val(&x4) == 0.);
+    }
+
+    #[test]
+    fn sos2_constraint_uses_weight_order() {
+        let mut model = Model::new()
+            .hide_output()
+            .include_default_plugins()
+            .create_prob("test")
+            .set_obj_sense(ObjSense::Maximize);
+
+        let x1 = model.add_var(0., 1., 2., "x1", VarType::Continuous);
+        let x2 = model.add_var(0., 1., 1., "x2", VarType::Continuous);
+        let x3 = model.add_var(0., 1., 1., "x3", VarType::Continuous);
+        let x4 = model.add_var(0., 1., 2., "x4", VarType::Continuous);
+
+        let weights = [0., 2., 3., 1.];
+        model.add_cons_sos2(vec![&x1, &x2, &x3, &x4], Some(&weights), "sos2");
+
+        let solved_model = model.solve();
+        assert_eq!(solved_model.status(), Status::Optimal);
+        assert_eq!(solved_model.obj_val(), 4.);
+
+        let solution = solved_model.best_sol().unwrap();
+        assert_eq!(solution.val(&x1), 1.);
+        assert_eq!(solution.val(&x2), 0.);
+        assert_eq!(solution.val(&x3), 0.);
+        assert_eq!(solution.val(&x4), 1.);
+    }
+
+    #[test]
+    #[should_panic(expected = "Failed to create SOS2 constraint")]
+    fn sos2_constraint_rejects_empty_variables() {
+        let mut model = Model::default().hide_output();
+        model.add_cons_sos2(Vec::new(), None, "sos2");
+    }
+
+    #[test]
+    #[should_panic(expected = "Failed to create SOS2 constraint")]
+    fn sos2_constraint_rejects_mismatched_weights() {
+        let mut model = Model::default().hide_output();
+        let x1 = model.add_var(0., 1., 1., "x1", VarType::Continuous);
+        model.add_cons_sos2(vec![&x1], Some(&[]), "sos2");
+    }
+
+    #[test]
+    #[should_panic(expected = "InvalidData")]
+    fn sos2_constraint_rejects_foreign_variable() {
+        let mut source = Model::default().hide_output();
+        let foreign = source.add_var(0., 1., 0., "foreign", VarType::Continuous);
+
+        let mut target = Model::default().hide_output();
+        let local = target.add_var(0., 1., 0., "local", VarType::Continuous);
+        target.add_cons_sos2(vec![&local, &foreign], None, "sos2");
     }
 
     #[test]
