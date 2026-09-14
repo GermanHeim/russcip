@@ -2410,7 +2410,7 @@ impl ScipPtr {
         Ok(())
     }
 
-    fn validate_var_ownership(&self, vars: &[&Variable]) -> Result<(), Retcode> {
+    fn validate_vars_ownership(&self, vars: &[&Variable]) -> Result<(), Retcode> {
         if vars.iter().any(|var| var.scip.raw != self.raw) {
             return Err(Retcode::InvalidData);
         }
@@ -2428,7 +2428,7 @@ impl ScipPtr {
             return Err(Retcode::ParameterWrongVal);
         }
 
-        self.validate_var_ownership(&vars)?;
+        self.validate_vars_ownership(&vars)?;
 
         if let Some(ws) = weights
             && vars.len() != ws.len()
@@ -2472,7 +2472,7 @@ impl ScipPtr {
             return Err(Retcode::ParameterWrongVal);
         }
 
-        self.validate_var_ownership(&vars)?;
+        self.validate_vars_ownership(&vars)?;
 
         if let Some(ws) = weights
             && vars.len() != ws.len()
