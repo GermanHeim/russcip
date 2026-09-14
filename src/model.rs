@@ -3094,10 +3094,10 @@ mod tests {
 
         let solved_model = model.solve();
         assert_eq!(solved_model.status(), Status::Optimal);
-        assert_eq!(solved_model.obj_val(), 3.);
+        assert!(solved_model.eq(solved_model.obj_val(), 3.));
 
         let solution = solved_model.best_sol().unwrap();
-        assert!(solution.val(&x1) == 0. || solution.val(&x4) == 0.);
+        assert!(solved_model.eq(solution.val(&x1), 0.) || solved_model.eq(solution.val(&x4), 0.));
     }
 
     #[test]
@@ -3118,13 +3118,13 @@ mod tests {
 
         let solved_model = model.solve();
         assert_eq!(solved_model.status(), Status::Optimal);
-        assert_eq!(solved_model.obj_val(), 4.);
+        assert!(solved_model.eq(solved_model.obj_val(), 4.));
 
         let solution = solved_model.best_sol().unwrap();
-        assert_eq!(solution.val(&x1), 1.);
-        assert_eq!(solution.val(&x2), 0.);
-        assert_eq!(solution.val(&x3), 0.);
-        assert_eq!(solution.val(&x4), 1.);
+        assert!(solved_model.eq(solution.val(&x1), 1.));
+        assert!(solved_model.eq(solution.val(&x2), 0.));
+        assert!(solved_model.eq(solution.val(&x3), 0.));
+        assert!(solved_model.eq(solution.val(&x4), 1.));
     }
 
     #[test]
