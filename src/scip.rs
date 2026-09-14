@@ -2410,6 +2410,14 @@ impl ScipPtr {
         Ok(())
     }
 
+    fn validate_vars_ownership(&self, vars: &[&Variable]) -> Result<(), Retcode> {
+        if vars.iter().any(|var| var.scip.raw != self.raw) {
+            return Err(Retcode::InvalidData);
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn create_cons_sos1(
         &self,
         vars: Vec<&Variable>,
@@ -2419,6 +2427,8 @@ impl ScipPtr {
         if vars.is_empty() {
             return Err(Retcode::ParameterWrongVal);
         }
+
+        self.validate_vars_ownership(&vars)?;
 
         if let Some(ws) = weights
             && vars.len() != ws.len()
@@ -2448,6 +2458,52 @@ impl ScipPtr {
 
         let scip_cons = unsafe { scip_cons.assume_init() };
         scip_call! { ffi::SCIPaddCons(self.raw, scip_cons) };
+
+        Ok(scip_cons)
+    }
+
+    pub(crate) fn create_cons_sos2(
+        &self,
+        vars: Vec<&Variable>,
+        weights: Option<&[f64]>,
+        name: &str,
+    ) -> Result<*mut SCIP_Cons, Retcode> {
+        if vars.is_empty() {
+            return Err(Retcode::ParameterWrongVal);
+        }
+
+        self.validate_vars_ownership(&vars)?;
+
+        if let Some(ws) = weights
+            && vars.len() != ws.len()
+        {
+            return Err(Retcode::ParameterWrongVal);
+        }
+
+        let c_name = CString::new(name).unwrap();
+        let mut scip_cons = MaybeUninit::uninit();
+        let mut var_ptrs = vars.iter().map(|v| v.raw).collect::<Vec<_>>();
+        let mut weights_vec = weights.map(<[f64]>::to_vec);
+        let weights_ptr = weights_vec
+            .as_mut()
+            .map_or(std::ptr::null_mut(), |weights| weights.as_mut_ptr());
+
+        scip_call! { ffi::SCIPcreateConsBasicSOS2(
+            self.raw,
+            scip_cons.as_mut_ptr(),
+            c_name.as_ptr(),
+            var_ptrs.len() as c_int,
+            var_ptrs.as_mut_ptr(),
+            weights_ptr,
+        ) };
+
+        let scip_cons = unsafe { scip_cons.assume_init() };
+        scip_call! { ffi::SCIPaddCons(self.raw, scip_cons) };
+
+        let stage = unsafe { ffi::SCIPgetStage(self.raw) };
+        if stage == ffi::SCIP_Stage_SCIP_STAGE_SOLVING {
+            self.conss_added_in_solving.borrow_mut().push(scip_cons);
+        }
 
         Ok(scip_cons)
     }
